@@ -5,6 +5,7 @@
 #include <numeric>
 #include <string>
 #include <climits>
+#include <bits/stdc++.h>
 using namespace std;
 
 /*
@@ -55,12 +56,12 @@ struct Fraction
         p /= g;
         q /= g;
 
-        // Ensure denominator is always positive (move sign to numerator)
-        if (q < 0)
-        {
-            p = -p;
-            q = -q;
-        }
+        // Ensure denominator is always positive (move sign to numerator) TODO: never really need it in this case.
+        // if (q < 0)
+        // {
+        //     p = -p;
+        //     q = -q;
+        // }
     }
 
     // Compare two fractions: is this fraction less than other?
@@ -84,10 +85,10 @@ struct Fraction
     }
 
     // Convert fraction to decimal (for debugging)
-    double toDouble() const
-    {
-        return (double)p / q;
-    }
+    // double toDouble() const
+    // {
+    //     return (double)p / q;
+    // }
 };
 
 // ============================================================================
@@ -266,7 +267,7 @@ vector<pair<int, int>> FindAvailableSegments(const string &schedule)
     int start = -1; // Start of current available segment (-1 if not in a segment)
 
     // Scan through the schedule
-    for (int i = 0; i < schedule.length(); i++)
+    for (int i = 0; i < (int)schedule.length(); i++)
     {
         if (schedule[i] == '.')
         {
@@ -321,6 +322,7 @@ set<Fraction> GenerateCandidateFractions(int L)
             if (f <= L)
             {
                 fractions.insert(f);
+                // cout << "Generated fraction: " << f.p << "/" << f.q << endl;
             }
         }
     }
@@ -328,17 +330,20 @@ set<Fraction> GenerateCandidateFractions(int L)
     // Add fractions based on lengths of available segments
     // If someone has an available segment of length 'len', we might be able to
     // sleep for len/k for various divisors k
+    // TODO: DOES THIS ACTUALLY HELP with Speed?
     for (int i = 0; i < n; i++)
     {
         auto segments = FindAvailableSegments(schedules[i]);
         for (auto [start, end] : segments)
         {
+            // cout << "Caretaker " << i << " has available segment: (" << start << ", " << end << ")" << endl;
             int len = end - start;
             for (int divisor = 1; divisor <= len && divisor <= 20; divisor++)
             {
                 Fraction f(len, divisor);
                 if (f <= L)
                 {
+                    // cout << "Generated fraction from segment: " << f.p << "/" << f.q << endl;
                     fractions.insert(f);
                 }
             }
@@ -670,10 +675,17 @@ int main()
         // '.' means available, 'X' means busy
     }
 
+    //print all the schedules
+    // cout << "Schedules:" << endl;
+    // for (int i = 0; i < n; i++)
+    // {
+    //     cout << "Caretaker " << i << ": " << schedules[i] << endl;
+    // }
+
     // Solve the problem and output the result
     cout << MaximizeSleepTime() << endl;
 
     return 0;
 
-    
+
 }
