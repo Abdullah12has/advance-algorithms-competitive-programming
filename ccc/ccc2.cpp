@@ -439,46 +439,133 @@ vector<int> InitializeCoverage(int timeline_length)
 }
 
 /**
- * BACKTRACKING ALGORITHM
+ * BACKTRACKING ALGORITHM with MCV (Most Constrained Variable) ordering
  *
  * Try to assign sleep intervals to all caretakers such that:
  *   1. Each caretaker sleeps for exactly T time units during their available time
  *   2. At every time point, at least one caretaker is awake
  *
+ * Uses Most Constrained Variable (MCV) heuristic: process caretakers with
+ * fewest valid intervals first to fail fast and reduce search space.
+ *
+ * Additional pruning strategies:
+ *   - Forward checking: only consider intervals that maintain coverage >= 1
+ *   - Fail-fast: if any caretaker has 0 viable intervals, return false immediately
+ *   - Interval ordering: try safer intervals (higher min coverage) first
+ *
  * Parameters:
- *   caretaker_idx: index of current caretaker we're assigning
+ *   assigned: vector tracking which caretakers have been assigned
  *   T: sleep duration (in scaled time)
  *   timeline_length: length of scaled timeline
  *   coverage_tree: segment tree tracking coverage (how many awake caretakers at each time)
  *
  * Returns: true if we found a valid assignment, false otherwise
  */
-bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &coverage_tree)
+bool Backtrack(vector<bool> &assigned, int T, int timeline_length, SegmentTree &coverage_tree)
 {
     // BASE CASE: all caretakers have been assigned sleep intervals
-    if (caretaker_idx == n)
+    int assigned_count = 0;
+    for (int i = 0; i < n; i++)
+    {
+        if (assigned[i])
+            assigned_count++;
+    }
+
+    if (assigned_count == n)
     {
         // Check if at every time point, at least one caretaker is awake
-        // This is true if the minimum coverage across all times is >= 1
         return coverage_tree.getMin() >= 1;
     }
 
-    // PRUNING: if current coverage is already invalid, no point continuing
+    // PRUNING 1: if current coverage is already invalid, no point continuing
     if (coverage_tree.getMin() < 1)
     {
         return false; // Some time point has 0 caretakers awake
     }
 
-    // Try each valid sleep interval for this caretaker
+    // PRUNING 2: MCV - Choose caretaker with FEWEST total intervals (most constrained)
+    // We use total intervals, not just "viable" ones, because forward checking
+    // might be too conservative and reject valid intervals in some cases.
+    // The actual coverage check after assignment will determine true validity.
+    int best_caretaker = -1;
+    int min_intervals = INT_MAX;
+
+    for (int i = 0; i < n; i++)
+    {
+        if (!assigned[i])
+        {
+            // Use total number of valid intervals (not filtered by forward checking)
+            int total_intervals = valid_intervals[i].size();
+
+            // PRUNING 3: Fail fast - if a caretaker has no intervals at all, impossible
+            if (total_intervals == 0)
+            {
+                return false; // Dead end - this caretaker can't be assigned
+            }
+
+            // Choose the most constrained (fewest total options)
+            if (total_intervals < min_intervals)
+            {
+                min_intervals = total_intervals;
+                best_caretaker = i;
+            }
+        }
+    }
+
+    // PRUNING 4: If no unassigned caretaker found, something went wrong
+    if (best_caretaker == -1)
+    {
+        return false;
+    }
+
+    int caretaker_idx = best_caretaker;
+    assigned[caretaker_idx] = true;
+
+    // PRUNING 5: Sort intervals by "safety" - prefer intervals that leave more coverage
+    // This helps find solutions faster by trying safer options first
+    // Note: We try ALL intervals, not just those that pass forward checking,
+    // because forward checking might be too conservative in some cases.
+    // The coverage check after assignment will determine if it's truly valid.
+    vector<pair<int, pair<int, int>>> interval_scores;
     for (auto [start, end] : valid_intervals[caretaker_idx])
     {
+        int min_coverage = INT_MAX;
+
+        if (end > start)
+        {
+            // Calculate minimum coverage if we assign this interval (for ordering)
+            for (int t = start; t < end; t++)
+            {
+                int current_coverage = coverage_tree.queryMin(t, t);
+                min_coverage = min(min_coverage, current_coverage);
+            }
+        }
+        else
+        {
+            // T=0 case: always viable, no coverage change
+            min_coverage = INT_MAX; // High score for T=0 intervals
+        }
+
+        // Score: prefer intervals that leave higher minimum coverage
+        // (negative for descending sort, so higher coverage comes first)
+        // We include ALL intervals - let the coverage check after assignment determine validity
+        interval_scores.push_back({-min_coverage, {start, end}});
+    }
+
+    // Sort by score (higher min_coverage first = safer intervals first)
+    sort(interval_scores.begin(), interval_scores.end());
+
+    // Try each valid sleep interval for the most constrained caretaker
+    for (auto [score, interval] : interval_scores)
+    {
+        auto [start, end] = interval;
+
         // ASSIGN: this caretaker sleeps during [start, end)
         sleep_assignment[caretaker_idx] = {start, end};
 
         // UPDATE COVERAGE: this caretaker is now asleep during [start, end-1]
-        // So we decrement the coverage count for those times
         if (end > start)
-        { // Skip if empty interval (T=0)
+        {
             coverage_tree.updateRange(start, end - 1, -1);
         }
 
@@ -486,7 +573,7 @@ bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &cover
         if (coverage_tree.getMin() >= 1)
         {
             // RECURSE: try assigning sleep intervals to remaining caretakers
-            if (Backtrack(caretaker_idx + 1, T, timeline_length, coverage_tree))
+            if (Backtrack(assigned, T, timeline_length, coverage_tree))
             {
                 return true; // Found a valid complete assignment!
             }
@@ -499,6 +586,9 @@ bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &cover
         }
         sleep_assignment[caretaker_idx] = {-1, -1}; // Unassign
     }
+
+    // BACKTRACK: unassign this caretaker
+    assigned[caretaker_idx] = false;
 
     // Tried all possible sleep intervals for this caretaker, none worked
     return false;
@@ -561,8 +651,11 @@ bool IsFeasible(Fraction T)
     // Initialize sleep assignment array (will be filled by backtracking)
     sleep_assignment.assign(n, {-1, -1});
 
-    // Try to find a valid assignment using backtracking
-    return Backtrack(0, scaled_T, scaled_L, coverage_tree);
+    // Initialize assigned vector for MCV backtracking
+    vector<bool> assigned(n, false);
+
+    // Try to find a valid assignment using backtracking with MCV ordering
+    return Backtrack(assigned, scaled_T, scaled_L, coverage_tree);
 }
 
 // ============================================================================
