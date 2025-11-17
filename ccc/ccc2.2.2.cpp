@@ -240,7 +240,7 @@ set<Fraction> GenerateCandidateFractions(int maxSleepTime)
         return fractions;
     }
 
-    for (int q = 1; q <= 20; q++)
+    for (int q = 1; q <= 9; q++)
     {
         for (int p = 0; p <= maxSleepTime * q; p++)
         {
