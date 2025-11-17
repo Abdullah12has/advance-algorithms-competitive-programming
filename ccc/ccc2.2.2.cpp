@@ -3,7 +3,8 @@ using namespace std;
 
 struct Fraction
 {
-    int p, q;
+    int p;
+    int q;
 
     Fraction(int p = 0, int q = 1) : p(p), q(q)
     {
@@ -18,14 +19,10 @@ struct Fraction
             q = 1;
             return;
         }
+
         int g = gcd(abs(p), abs(q));
         p /= g;
         q /= g;
-        if (q < 0)
-        {
-            p = -p;
-            q = -q;
-        }
     }
 
     bool operator<(const Fraction &other) const
@@ -41,11 +38,6 @@ struct Fraction
     bool operator<=(int val) const
     {
         return p <= (long long)val * q;
-    }
-
-    double toDouble() const
-    {
-        return (double)p / q;
     }
 };
 
@@ -71,29 +63,40 @@ private:
         }
     }
 
-    void push(int node)
-    {
-        if (lazy[node] != 0)
-        {
-            tree[2 * node] += lazy[node];
-            tree[2 * node + 1] += lazy[node];
+void push(int node, int start, int end) {
+    if (lazy[node] != 0) {
+        // Apply lazy value to current node's minimum
+        tree[node] += lazy[node]; 
+
+        if (start != end) {
+            // Pass the lazy value down to children
             lazy[2 * node] += lazy[node];
             lazy[2 * node + 1] += lazy[node];
-            lazy[node] = 0;
         }
+        lazy[node] = 0;
     }
+}
 
     void updateRange(int node, int start, int end, int l, int r, int val)
     {
+        push(node, start, end); // Apply pending updates before processing
+
         if (r < start || end < l)
+        {
             return;
+        }
+
         if (l <= start && end <= r)
         {
             tree[node] += val;
-            lazy[node] += val;
+            if (start != end)
+            {
+                lazy[2 * node] += val;
+                lazy[2 * node + 1] += val;
+            }
             return;
         }
-        push(node);
+
         int mid = (start + end) / 2;
         updateRange(2 * node, start, mid, l, r, val);
         updateRange(2 * node + 1, mid + 1, end, l, r, val);
@@ -103,13 +106,21 @@ private:
     int queryMin(int node, int start, int end, int l, int r)
     {
         if (r < start || end < l)
+        {
             return INT_MAX;
+        }
+
+        push(node, start, end); // Apply pending updates before querying
+
         if (l <= start && end <= r)
+        {
             return tree[node];
-        push(node);
+        }
+
         int mid = (start + end) / 2;
-        return min(queryMin(2 * node, start, mid, l, r),
-                   queryMin(2 * node + 1, mid + 1, end, l, r));
+        int left_min = queryMin(2 * node, start, mid, l, r);
+        int right_min = queryMin(2 * node + 1, mid + 1, end, l, r);
+        return min(left_min, right_min);
     }
 
 public:
@@ -133,14 +144,21 @@ public:
 
     int getMin()
     {
-        return queryMin(0, n - 1);
+        push(1, 0, n - 1); // Ensure root is up-to-date
+        return tree[1];
     }
 };
 
-int n, L;
+int n;
+int L;
 vector<string> schedules;
+int max_possible_sleep = 0;
+bool max_sleep_computed = false;
+
 vector<string> scaled_schedule;
-int scaled_L, scaled_T;
+int scaled_L;
+int scaled_T;
+
 vector<vector<pair<int, int>>> valid_intervals;
 vector<pair<int, int>> sleep_assignment;
 
@@ -149,12 +167,14 @@ vector<pair<int, int>> FindAvailableSegments(const string &schedule)
     vector<pair<int, int>> segments;
     int start = -1;
 
-    for (int i = 0; i < schedule.length(); i++)
+    for (int i = 0; i < (int)schedule.length(); i++)
     {
         if (schedule[i] == '.')
         {
             if (start == -1)
+            {
                 start = i;
+            }
         }
         else
         {
@@ -165,6 +185,7 @@ vector<pair<int, int>> FindAvailableSegments(const string &schedule)
             }
         }
     }
+
     if (start != -1)
     {
         segments.push_back({start, (int)schedule.length()});
@@ -173,16 +194,58 @@ vector<pair<int, int>> FindAvailableSegments(const string &schedule)
     return segments;
 }
 
-set<Fraction> GenerateCandidateFractions(int L)
+int ComputeMaxPossibleSleep()
+{
+    if (max_sleep_computed)
+    {
+        return max_possible_sleep;
+    }
+
+    max_possible_sleep = INT_MAX;
+    for (const string &schedule : schedules)
+    {
+        int best = 0;
+        int current = 0;
+        for (char c : schedule)
+        {
+            if (c == '.')
+            {
+                current++;
+                best = max(best, current);
+            }
+            else
+            {
+                current = 0;
+            }
+        }
+        max_possible_sleep = min(max_possible_sleep, best);
+    }
+
+    if (max_possible_sleep == INT_MAX)
+    {
+        max_possible_sleep = 0;
+    }
+
+    max_sleep_computed = true;
+    return max_possible_sleep;
+}
+
+set<Fraction> GenerateCandidateFractions(int maxSleepTime)
 {
     set<Fraction> fractions;
 
-    for (int q = 1; q <= L && q <= 20; q++)
+    if (maxSleepTime == 0)
     {
-        for (int p = 0; p <= L * q; p++)
+        fractions.insert(Fraction(0, 1));
+        return fractions;
+    }
+
+    for (int q = 1; q <= 20; q++)
+    {
+        for (int p = 0; p <= maxSleepTime * q; p++)
         {
             Fraction f(p, q);
-            if (f <= L)
+            if (f <= maxSleepTime)
             {
                 fractions.insert(f);
             }
@@ -198,7 +261,7 @@ set<Fraction> GenerateCandidateFractions(int L)
             for (int divisor = 1; divisor <= len && divisor <= 20; divisor++)
             {
                 Fraction f(len, divisor);
-                if (f <= L)
+                if (f <= maxSleepTime)
                 {
                     fractions.insert(f);
                 }
@@ -219,14 +282,19 @@ vector<pair<int, int>> PrecomputeSleepIntervals(int caretaker_id, int T, int tim
         return intervals;
     }
 
-    for (int start = 0; start <= timeline_length - T; start++)
+    int start = 0;
+
+    while (start <= timeline_length - T)
     {
         bool can_sleep = true;
+        int first_blocked = -1;
+
         for (int t = start; t < start + T; t++)
         {
             if (scaled_schedule[caretaker_id][t] == 'X')
             {
                 can_sleep = false;
+                first_blocked = t;
                 break;
             }
         }
@@ -234,6 +302,11 @@ vector<pair<int, int>> PrecomputeSleepIntervals(int caretaker_id, int T, int tim
         if (can_sleep)
         {
             intervals.push_back({start, start + T});
+            start++;
+        }
+        else
+        {
+            start = first_blocked + 1;
         }
     }
 
@@ -243,6 +316,7 @@ vector<pair<int, int>> PrecomputeSleepIntervals(int caretaker_id, int T, int tim
 vector<int> InitializeCoverage(int timeline_length)
 {
     vector<int> coverage(timeline_length, 0);
+
     for (int t = 0; t < timeline_length; t++)
     {
         for (int i = 0; i < n; i++)
@@ -253,12 +327,20 @@ vector<int> InitializeCoverage(int timeline_length)
             }
         }
     }
+
     return coverage;
 }
 
-bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &coverage_tree)
+bool Backtrack(vector<bool> &assigned, int T, int timeline_length, SegmentTree &coverage_tree)
 {
-    if (caretaker_idx == n)
+    int assigned_count = 0;
+    for (int i = 0; i < n; i++)
+    {
+        if (assigned[i])
+            assigned_count++;
+    }
+
+    if (assigned_count == n)
     {
         return coverage_tree.getMin() >= 1;
     }
@@ -268,8 +350,55 @@ bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &cover
         return false;
     }
 
+    int best_caretaker = -1;
+    int min_intervals = INT_MAX;
+
+    for (int i = 0; i < n; i++)
+    {
+        if (!assigned[i])
+        {
+            int total_intervals = valid_intervals[i].size();
+
+            if (total_intervals == 0)
+            {
+                return false;
+            }
+
+            if (total_intervals < min_intervals)
+            {
+                min_intervals = total_intervals;
+                best_caretaker = i;
+            }
+        }
+    }
+
+    if (best_caretaker == -1)
+    {
+        return false;
+    }
+
+    int caretaker_idx = best_caretaker;
+    assigned[caretaker_idx] = true;
+
+    vector<pair<int, pair<int, int>>> interval_scores;
     for (auto [start, end] : valid_intervals[caretaker_idx])
     {
+        int min_coverage = INT_MAX;
+
+        if (end > start)
+        {
+            min_coverage = coverage_tree.queryMin(start, end - 1);
+        }
+
+        interval_scores.push_back({-min_coverage, {start, end}});
+    }
+
+    sort(interval_scores.begin(), interval_scores.end());
+
+    for (auto [score, interval] : interval_scores)
+    {
+        auto [start, end] = interval;
+
         sleep_assignment[caretaker_idx] = {start, end};
 
         if (end > start)
@@ -279,7 +408,7 @@ bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &cover
 
         if (coverage_tree.getMin() >= 1)
         {
-            if (Backtrack(caretaker_idx + 1, T, timeline_length, coverage_tree))
+            if (Backtrack(assigned, T, timeline_length, coverage_tree))
             {
                 return true;
             }
@@ -289,19 +418,26 @@ bool Backtrack(int caretaker_idx, int T, int timeline_length, SegmentTree &cover
         {
             coverage_tree.updateRange(start, end - 1, 1);
         }
-
         sleep_assignment[caretaker_idx] = {-1, -1};
     }
+
+    assigned[caretaker_idx] = false;
 
     return false;
 }
 
 bool IsFeasible(Fraction T)
 {
-    int p = T.p, q = T.q;
+    int p = T.p;
+    int q = T.q;
 
     scaled_L = L * q;
     scaled_T = p;
+
+    if (scaled_L == 0 && scaled_T > 0)
+        return false;
+    if (scaled_L == 0 && scaled_T == 0)
+        return true;
 
     scaled_schedule.assign(n, string(scaled_L, '.'));
     for (int i = 0; i < n; i++)
@@ -319,6 +455,7 @@ bool IsFeasible(Fraction T)
     for (int i = 0; i < n; i++)
     {
         valid_intervals[i] = PrecomputeSleepIntervals(i, scaled_T, scaled_L);
+
         if (valid_intervals[i].empty())
         {
             return false;
@@ -326,11 +463,20 @@ bool IsFeasible(Fraction T)
     }
 
     vector<int> initial_coverage = InitializeCoverage(scaled_L);
+
+    for (int cov : initial_coverage)
+    {
+        if (cov == 0)
+            return false;
+    }
+
     SegmentTree coverage_tree(initial_coverage);
 
     sleep_assignment.assign(n, {-1, -1});
 
-    return Backtrack(0, scaled_T, scaled_L, coverage_tree);
+    vector<bool> assigned(n, false);
+
+    return Backtrack(assigned, scaled_T, scaled_L, coverage_tree);
 }
 
 string MaximizeSleepTime()
@@ -338,6 +484,7 @@ string MaximizeSleepTime()
     for (int t = 0; t < L; t++)
     {
         bool all_busy = true;
+
         for (int i = 0; i < n; i++)
         {
             if (schedules[i][t] == '.')
@@ -346,18 +493,29 @@ string MaximizeSleepTime()
                 break;
             }
         }
+
         if (all_busy)
         {
             return "SAD CAT";
         }
     }
 
-    set<Fraction> candidates = GenerateCandidateFractions(L);
+    int maxSleepTime = ComputeMaxPossibleSleep();
+
+    if (maxSleepTime == 0)
+    {
+        Fraction zero(0, 1);
+        return IsFeasible(zero) ? "0/1" : "SAD CAT";
+    }
+
+    set<Fraction> candidates = GenerateCandidateFractions(maxSleepTime);
+
     vector<Fraction> sorted_candidates(candidates.begin(), candidates.end());
+
     sort(sorted_candidates.rbegin(), sorted_candidates.rend());
 
-    bool found = false;
     Fraction best_fraction(0, 1);
+    bool found = false;
     for (const Fraction &T : sorted_candidates)
     {
         if (IsFeasible(T))
@@ -370,6 +528,10 @@ string MaximizeSleepTime()
 
     if (!found)
     {
+        if (IsFeasible(Fraction(0, 1)))
+        {
+            return "0/1";
+        }
         return "SAD CAT";
     }
 
@@ -379,9 +541,7 @@ string MaximizeSleepTime()
 int main()
 {
     cin >> n >> L;
-    
     schedules.resize(n);
-
     for (int i = 0; i < n; i++)
     {
         cin >> schedules[i];
