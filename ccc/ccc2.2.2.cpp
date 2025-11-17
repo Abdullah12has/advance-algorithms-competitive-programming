@@ -20,7 +20,7 @@ struct Fraction
             return;
         }
 
-        int g = gcd(abs(p), abs(q));
+        int g = __gcd(abs(p), abs(q));
         p /= g;
         q /= g;
     }
@@ -63,23 +63,24 @@ private:
         }
     }
 
-void push(int node, int start, int end) {
-    if (lazy[node] != 0) {
-        // Apply lazy value to current node's minimum
-        tree[node] += lazy[node]; 
+    void push(int node, int start, int end)
+    {
+        if (lazy[node] != 0)
+        {
+            tree[node] += lazy[node];
 
-        if (start != end) {
-            // Pass the lazy value down to children
-            lazy[2 * node] += lazy[node];
-            lazy[2 * node + 1] += lazy[node];
+            if (start != end)
+            {
+                lazy[2 * node] += lazy[node];
+                lazy[2 * node + 1] += lazy[node];
+            }
+            lazy[node] = 0;
         }
-        lazy[node] = 0;
     }
-}
 
     void updateRange(int node, int start, int end, int l, int r, int val)
     {
-        push(node, start, end); // Apply pending updates before processing
+        push(node, start, end);
 
         if (r < start || end < l)
         {
@@ -110,7 +111,7 @@ void push(int node, int start, int end) {
             return INT_MAX;
         }
 
-        push(node, start, end); // Apply pending updates before querying
+        push(node, start, end);
 
         if (l <= start && end <= r)
         {
@@ -144,7 +145,7 @@ public:
 
     int getMin()
     {
-        push(1, 0, n - 1); // Ensure root is up-to-date
+        push(1, 0, n - 1);
         return tree[1];
     }
 };
@@ -240,6 +241,7 @@ set<Fraction> GenerateCandidateFractions(int maxSleepTime)
         return fractions;
     }
 
+    // Generate fractions with denominators up to 9
     for (int q = 1; q <= 9; q++)
     {
         for (int p = 0; p <= maxSleepTime * q; p++)
@@ -252,6 +254,7 @@ set<Fraction> GenerateCandidateFractions(int maxSleepTime)
         }
     }
 
+    // Generate fractions from available segments
     for (int i = 0; i < n; i++)
     {
         auto segments = FindAvailableSegments(schedules[i]);
@@ -331,8 +334,10 @@ vector<int> InitializeCoverage(int timeline_length)
     return coverage;
 }
 
+// NEW OPTIMIZED BACKTRACKING: Sort by index (ascending order)
 bool Backtrack(vector<bool> &assigned, int T, int timeline_length, SegmentTree &coverage_tree)
 {
+    // Check if all caretakers are assigned
     int assigned_count = 0;
     for (int i = 0; i < n; i++)
     {
@@ -345,83 +350,100 @@ bool Backtrack(vector<bool> &assigned, int T, int timeline_length, SegmentTree &
         return coverage_tree.getMin() >= 1;
     }
 
+    // Early pruning: if coverage drops below 1, fail fast
     if (coverage_tree.getMin() < 1)
     {
         return false;
     }
 
-    int best_caretaker = -1;
-    int min_intervals = INT_MAX;
+    // Collect ALL possible starting points from ALL unassigned caretakers
+    // Format: (start_index, caretaker_id, end_index)
+    vector<tuple<int, int, int>> all_candidates;
 
     for (int i = 0; i < n; i++)
     {
         if (!assigned[i])
         {
-            int total_intervals = valid_intervals[i].size();
-
-            if (total_intervals == 0)
+            // Check if this caretaker has any valid intervals
+            if (valid_intervals[i].empty())
             {
-                return false;
+                return false; // No valid sleep interval for this caretaker
             }
 
-            if (total_intervals < min_intervals)
+            for (auto [start, end] : valid_intervals[i])
             {
-                min_intervals = total_intervals;
-                best_caretaker = i;
+                all_candidates.push_back({start, i, end});
             }
         }
     }
 
-    if (best_caretaker == -1)
+    if (all_candidates.empty())
     {
         return false;
     }
 
-    int caretaker_idx = best_caretaker;
-    assigned[caretaker_idx] = true;
+    // Sort by starting index (ascending order)
+    sort(all_candidates.begin(), all_candidates.end());
 
-    vector<pair<int, pair<int, int>>> interval_scores;
-    for (auto [start, end] : valid_intervals[caretaker_idx])
+    // Try to assign sleep to the minimum index first
+    // Group by caretaker to avoid assigning same caretaker multiple times
+    set<int> tried_caretakers;
+
+    for (auto [start, caretaker_id, end] : all_candidates)
     {
-        int min_coverage = INT_MAX;
+        // Skip if we already tried this caretaker in this iteration
+        if (tried_caretakers.count(caretaker_id))
+            continue;
 
-        if (end > start)
+        tried_caretakers.insert(caretaker_id);
+
+        // Mark this caretaker as assigned
+        assigned[caretaker_id] = true;
+
+        // Try all intervals for this caretaker, sorted by start index
+        vector<pair<int, int>> caretaker_intervals;
+        for (auto [s, e] : valid_intervals[caretaker_id])
         {
-            min_coverage = coverage_tree.queryMin(start, end - 1);
+            caretaker_intervals.push_back({s, e});
         }
 
-        interval_scores.push_back({-min_coverage, {start, end}});
-    }
+        // Sort intervals by start index (ascending)
+        sort(caretaker_intervals.begin(), caretaker_intervals.end());
 
-    sort(interval_scores.begin(), interval_scores.end());
+        bool found_valid = false;
 
-    for (auto [score, interval] : interval_scores)
-    {
-        auto [start, end] = interval;
-
-        sleep_assignment[caretaker_idx] = {start, end};
-
-        if (end > start)
+        for (auto [s, e] : caretaker_intervals)
         {
-            coverage_tree.updateRange(start, end - 1, -1);
-        }
+            sleep_assignment[caretaker_id] = {s, e};
 
-        if (coverage_tree.getMin() >= 1)
-        {
-            if (Backtrack(assigned, T, timeline_length, coverage_tree))
+            // Update coverage
+            if (e > s)
             {
-                return true;
+                coverage_tree.updateRange(s, e - 1, -1);
             }
+
+            // Recalculate feasibility: check if coverage is still >= 1
+            if (coverage_tree.getMin() >= 1)
+            {
+                if (Backtrack(assigned, T, timeline_length, coverage_tree))
+                {
+                    return true;
+                }
+            }
+
+            // Backtrack: restore coverage
+            if (e > s)
+            {
+                coverage_tree.updateRange(s, e - 1, 1);
+            }
+            sleep_assignment[caretaker_id] = {-1, -1};
         }
 
-        if (end > start)
-        {
-            coverage_tree.updateRange(start, end - 1, 1);
-        }
-        sleep_assignment[caretaker_idx] = {-1, -1};
+        // Unmark this caretaker
+        assigned[caretaker_id] = false;
+
+        // If we couldn't find a valid assignment for this caretaker, try next
     }
-
-    assigned[caretaker_idx] = false;
 
     return false;
 }
@@ -439,6 +461,7 @@ bool IsFeasible(Fraction T)
     if (scaled_L == 0 && scaled_T == 0)
         return true;
 
+    // Expand the schedule by factor q
     scaled_schedule.assign(n, string(scaled_L, '.'));
     for (int i = 0; i < n; i++)
     {
@@ -451,6 +474,7 @@ bool IsFeasible(Fraction T)
         }
     }
 
+    // Precompute valid sleep intervals for each caretaker
     valid_intervals.assign(n, vector<pair<int, int>>());
     for (int i = 0; i < n; i++)
     {
@@ -462,6 +486,7 @@ bool IsFeasible(Fraction T)
         }
     }
 
+    // Initialize coverage
     vector<int> initial_coverage = InitializeCoverage(scaled_L);
 
     for (int cov : initial_coverage)
@@ -470,6 +495,7 @@ bool IsFeasible(Fraction T)
             return false;
     }
 
+    // Build segment tree for coverage
     SegmentTree coverage_tree(initial_coverage);
 
     sleep_assignment.assign(n, {-1, -1});
@@ -481,6 +507,7 @@ bool IsFeasible(Fraction T)
 
 string MaximizeSleepTime()
 {
+    // Check if any time slot has all caretakers busy
     for (int t = 0; t < L; t++)
     {
         bool all_busy = true;
@@ -508,14 +535,17 @@ string MaximizeSleepTime()
         return IsFeasible(zero) ? "0/1" : "SAD CAT";
     }
 
+    // Generate all candidate fractions
     set<Fraction> candidates = GenerateCandidateFractions(maxSleepTime);
 
     vector<Fraction> sorted_candidates(candidates.begin(), candidates.end());
 
+    // Binary search style: test from largest to smallest
     sort(sorted_candidates.rbegin(), sorted_candidates.rend());
 
     Fraction best_fraction(0, 1);
     bool found = false;
+
     for (const Fraction &T : sorted_candidates)
     {
         if (IsFeasible(T))
